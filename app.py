@@ -13,7 +13,7 @@ with st.form("form_bayar"):
     tagihan = st.selectbox("TAGIHAN", [150000, 200000, 250000, 300000])
     submit = st.form_submit_button("SIMPAN")
 if submit:
-    df = conn.read()
+    df = conn.read(worksheet="Data Pembayaran", ttl="0") # ttl="0" agar data selalu segar (tidak tersimpan di cache)
     tgl_str = tgl.strftime("%d/%m/%Y")
     bulan = tgl.strftime("%b").lower()
     # Mapping nama bulan Indo
