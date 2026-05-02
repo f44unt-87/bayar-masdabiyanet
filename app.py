@@ -14,6 +14,7 @@ with st.form("form_bayar"):
     submit = st.form_submit_button("SIMPAN")
 if submit:
     df = conn.read(worksheet="Data Pembayaran", ttl="0") # ttl="0" agar data selalu segar (tidak tersimpan di cache)
+    df = df.astype(object)
     tgl_str = tgl.strftime("%d/%m/%Y")
     bulan = tgl.strftime("%b").lower()
     # Mapping nama bulan Indo
