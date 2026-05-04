@@ -11,38 +11,29 @@ st.title("💰 MASDABIYANET")
 # Koneksi Google Sheets
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# Fungsi Pencarian Nama untuk Searchbox
+# Fungsi Pencarian Nama (Tetap sama)
 def search_customer(search_term: str):
-    if not search_term:
-        return []
+    if not search_term: return []
     try:
-        # Membaca data nama dari Sheets (Cache 5 menit)
         df_names = conn.read(ttl="5m")
         all_names = df_names['Nama'].dropna().unique().tolist()
-        matches = [name for name in all_names if search_term.lower() in name.lower()]
-        return matches
-    except:
-        return []
+        return [name for name in all_names if search_term.lower() in name.lower()]
+    except: return []
 
 # --- 1. INPUT NAMA ---
 nama_pilihan = st_searchbox(
     search_customer,
     label="NAMA PELANGGAN",
-    placeholder="Ketik nama (contoh: joko)...",
+    placeholder="Ketik nama...",
     key="customer_search",
-    edit_after_submit=True, 
 )
-
-if not nama_pilihan:
-    nama = st.session_state.get("customer_search", {}).get("search", "")
-else:
-    nama = nama_pilihan
+nama = nama_pilihan if nama_pilihan else st.session_state.get("customer_search", {}).get("search", "")
 
 # --- 2. FORM DATA PEMBAYARAN ---
 with st.form("form_bayar"):
     tgl = st.date_input("TANGGAL BAYAR")
     tagihan = st.selectbox("TAGIHAN", [150000, 200000, 250000, 300000])
-    submit = st.form_submit_button("SIMPAN")
+    submit = st.form_submit_button("SIMPAN & BUAT NOTA")
 
 # Proses Simpan Data
 if submit:
@@ -53,37 +44,64 @@ if submit:
         df = df.astype(object)
         
         tgl_str = tgl.strftime("%d/%m/%Y")
-        bulan = tgl.strftime("%b").lower()
-        
+        bulan_key = tgl.strftime("%b").lower()
         mapping = {'may': 'mei', 'aug': 'agu', 'oct': 'okt', 'dec': 'des'}
-        if bulan in mapping: bulan = mapping[bulan]
+        bulan_indo = mapping.get(bulan_key, bulan_key)
         
+        # Update/Insert Data
         if nama in df['Nama'].values:
             idx = df.index[df['Nama'] == nama][0]
             df.at[idx, 'Tanggal Bayar'] = tgl_str
             df.at[idx, 'Tagihan'] = tagihan
-            df.at[idx, bulan] = tgl_str
-            st.success(f"Data {nama} diperbarui!")
+            df.at[idx, bulan_indo] = tgl_str
+            pesan = f"Data {nama} diperbarui!"
         else:
-            new_row = {"Nama": nama, "Tanggal Bayar": tgl_str, "Tagihan": tagihan, bulan: tgl_str}
+            new_row = {"Nama": nama, "Tanggal Bayar": tgl_str, "Tagihan": tagihan, bulan_indo: tgl_str}
             df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-            st.success(f"Pelanggan {nama} baru ditambahkan!")
+            pesan = f"Pelanggan {nama} baru ditambahkan!"
         
         conn.update(data=df)
+        st.success(pesan)
+
+        # --- FITUR CETAK NOTA ---
+        st.markdown("---")
+        st.subheader("🧾 Nota Pembayaran")
+        
+        # Menyusun format nota (Plain Text)
+        nota_teks = f"""
+================================
+       MASDABIYANET
+================================
+Tanggal  : {tgl_str}
+Nama     : {nama.upper()}
+Layanan  : Internet Bulanan
+Total    : Rp {tagihan:,}
+Status   : LUNAS
+================================
+   Terima Kasih Atas
+     Pembayaran Anda
+================================
+        """
+        
+        # Menampilkan pratinjau nota di kotak kode
+        st.code(nota_teks)
+        
+        # Tombol Download Nota sebagai File .txt
+        st.download_button(
+            label="💾 Download Nota (.txt)",
+            data=nota_teks,
+            file_name=f"Nota_{nama}_{tgl_str}.txt",
+            mime="text/plain"
+        )
 
 # --- 3. TAMPILAN DATA KESELURUHAN ---
-st.markdown("---") # Garis pembatas
+st.markdown("---")
 if st.button("📊 TAMPILKAN DATA PELANGGAN"):
     try:
-        # Mengambil data terbaru tanpa cache
         df_view = conn.read(ttl="0")
-        
         if not df_view.empty:
             st.subheader("Data Keseluruhan Pelanggan")
-            # Menampilkan tabel yang bisa di-scroll dan difilter
             st.dataframe(df_view, use_container_width=True)
-            
-            # Opsional: Ringkasan singkat
             st.info(f"Total Pelanggan Terdaftar: {len(df_view)} orang")
         else:
             st.warning("Database masih kosong.")
