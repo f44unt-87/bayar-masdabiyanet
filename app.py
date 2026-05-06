@@ -18,7 +18,7 @@ st.markdown("""
         text-align: center; padding: 12px; border-radius: 8px; font-weight: bold; 
         text-decoration: none; margin-top: 10px; border: none;
     }
-    .wa-button:hover { background-color: #128C7E; color: white; }
+    .wa-button:hover { background-color: #128C7E; color: white; cursor: pointer; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -37,55 +37,68 @@ def search_customer(search_term: str):
     except: return []
 
 def buat_link_wa(nama, tagihan, tgl, no_hp):
-    """Membuat link API WhatsApp."""
-    if not no_hp or pd.isna(no_hp): return None
-    num = str(no_hp).strip().replace(" ", "").replace("-", "").replace("+", "")
-    if num.startswith('0'): num = '62' + num[1:]
-    
-    pesan = (f"Halo Kak *{nama.upper()}*,\n\n"
-             f"Terima kasih, pembayaran internet *MASDABIYANET* telah kami terima.\n"
-             f"Total: *Rp {tagihan:,}*\n"
-             f"Tanggal: *{tgl}*\n\n"
-             f"Status: *LUNAS* ✅\n"
-             f"Selamat berinternet kembali!")
-    return f"https://wa.me/{num}?text={urllib.parse.quote(pesan)}"
+    """Membuat link API WhatsApp dengan proteksi error tipe data."""
+    try:
+        if pd.isna(no_hp) or not no_hp: 
+            return None
+        
+        # Membersihkan nomor: ambil angka saja, tangani jika ada format .0 (float)
+        num = str(no_hp).split('.')[0]
+        num = "".join(filter(str.isdigit, num)) 
+        
+        if not num: return None
+
+        # Konversi awalan 0 ke 62
+        if num.startswith('0'): 
+            num = '62' + num[1:]
+        elif not num.startswith('62'):
+            num = '62' + num
+        
+        pesan = (f"Halo Kak *{nama.upper()}*,\n\n"
+                 f"Terima kasih, pembayaran internet *MASDABIYANET* telah kami terima.\n"
+                 f"Total: *Rp {tagihan:,}*\n"
+                 f"Tanggal: *{tgl}*\n\n"
+                 f"Status: *LUNAS* ✅\n"
+                 f"Selamat berinternet kembali!")
+        return f"https://wa.me/{num}?text={urllib.parse.quote(pesan)}"
+    except Exception:
+        return None
 
 # --- 3. LOGIKA HANDLING NAMA & AUTO-FILL ---
-# Inisialisasi session state agar input tidak hilang
 if "nama_disimpan" not in st.session_state:
     st.session_state.nama_disimpan = ""
 
-# Searchbox untuk cari nama
 nama_pilihan = st_searchbox(
     search_customer, 
     label="Cari Pelanggan (Ketik nama baru jika tidak ada)", 
     key="customer_search"
 )
 
-# Ambil teks yang sedang diketik meskipun tidak dipilih dari list (Anti-Hilang)
 teks_sedang_diketik = st.session_state.get("customer_search", {}).get("search", "")
 
-# Tentukan nama final: Prioritas hasil klik, jika tidak ada pakai hasil ketikan
 if nama_pilihan:
     st.session_state.nama_disimpan = nama_pilihan
 elif teks_sedang_diketik:
     st.session_state.nama_disimpan = teks_sedang_diketik
 
-# Tampilkan Nama yang akan diproses
 nama_aktif = st.session_state.nama_disimpan
-if nama_aktif:
-    st.info(f"📍 Memproses untuk: **{nama_aktif.upper()}**")
 
-# Lookup No HP jika nama_aktif ada di database
+# Lookup No HP secara otomatis
 no_hp_terdeteksi = ""
 if nama_aktif:
     try:
         df_lookup = conn.read(ttl="1m")
-        match = df_lookup[df_lookup['Nama'].str.lower() == nama_aktif.lower()]
+        # Cari baris yang namanya cocok (case-insensitive)
+        match = df_lookup[df_lookup['Nama'].astype(str).str.lower() == nama_aktif.lower()]
         if not match.empty:
-            no_hp_terdeteksi = str(match['No HP'].values[0])
+            val_hp = match['No HP'].values[0]
+            # Pastikan tidak mengambil nilai NaN
+            no_hp_terdeteksi = str(val_hp).split('.')[0] if pd.notna(val_hp) else ""
     except:
         pass
+
+if nama_aktif:
+    st.info(f"📍 Memproses untuk: **{nama_aktif.upper()}**")
 
 # --- 4. FORM TRANSAKSI ---
 with st.form("form_utama", clear_on_submit=False):
@@ -94,7 +107,6 @@ with st.form("form_utama", clear_on_submit=False):
         tgl = st.date_input("TANGGAL BAYAR", datetime.now())
         tagihan = st.selectbox("TAGIHAN", [150000, 200000, 250000, 300000])
     with col2:
-        # Field No HP akan terisi otomatis jika ditemukan
         no_hp_input = st.text_input("NO WHATSAPP", value=no_hp_terdeteksi, placeholder="0812...")
     
     submit_button = st.form_submit_button("💾 SIMPAN & BUAT NOTA")
@@ -108,7 +120,6 @@ if submit_button:
     else:
         with st.spinner("Menyimpan ke Google Sheets..."):
             try:
-                # Ambil data paling fresh
                 df = conn.read(ttl="0").astype(object)
                 tgl_str = tgl.strftime("%d/%m/%Y")
                 
@@ -118,7 +129,8 @@ if submit_button:
                 bulan_indo = mapping.get(bulan_key, bulan_key)
 
                 # Update atau Tambah Data Baru
-                mask = df['Nama'].str.lower() == nama_aktif.lower()
+                mask = df['Nama'].astype(str).str.lower() == nama_aktif.lower()
+                
                 if mask.any():
                     idx = df.index[mask][0]
                     df.at[idx, 'No HP'] = no_hp_input
@@ -136,11 +148,10 @@ if submit_button:
                     }
                     df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
 
-                # Kirim ke Sheets
                 conn.update(data=df)
                 st.success(f"✅ Transaksi {nama_aktif} berhasil dicatat!")
 
-                # Tampilkan Nota
+                # Nota Preview
                 nota = f"================================\n       MASDABIYANET\n================================\nTANGGAL  : {tgl_str}\nNAMA     : {nama_aktif.upper()}\nTAGIHAN  : Rp {tagihan:,}\nSTATUS   : LUNAS\n================================"
                 st.code(nota)
                 
@@ -148,8 +159,10 @@ if submit_button:
                 link_wa = buat_link_wa(nama_aktif, tagihan, tgl_str, no_hp_input)
                 if link_wa:
                     st.markdown(f'<a href="{link_wa}" target="_blank" class="wa-button">📲 KIRIM NOTA VIA WHATSAPP</a>', unsafe_allow_html=True)
+                else:
+                    st.warning("⚠️ Nomor WhatsApp tidak valid, link tidak bisa dibuat.")
                 
-                # Reset nama setelah berhasil agar form bersih untuk input selanjutnya
+                # Reset nama
                 st.session_state.nama_disimpan = ""
 
             except Exception as e:
