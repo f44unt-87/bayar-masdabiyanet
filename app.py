@@ -3,11 +3,11 @@ from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 from datetime import datetime
 import urllib.parse
+from streamlit_searchbox import st_searchbox
 
 # --- SETUP HALAMAN ---
 st.set_page_config(page_title="BAYAR-MASDABIYANET", layout="wide", page_icon="💰")
 
-# --- KONEKSI & SETUP DATA ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 LIST_BULAN = ['jan', 'feb', 'mar', 'apr', 'mei', 'jun', 'jul', 'agu', 'sep', 'okt', 'nov', 'des']
 
@@ -43,9 +43,22 @@ st.title("💰 MASDABIYANET")
 tab1, tab2 = st.tabs(["➕ INPUT TRANSAKSI BARU", "📋 KELOLA DATA PELANGGAN"])
 
 with tab1:
+    # Autocomplete Nama
+    def search_pelanggan(search_term):
+        df = st.session_state.df_data
+        return [nama for nama in df['Nama'].unique() if search_term.lower() in nama.lower()]
+
+    nama_pilihan = st_searchbox(search_pelanggan, label="Nama Pelanggan", key="nama_search")
+    
+    no_hp_default = ""
+    if nama_pilihan:
+        match = st.session_state.df_data[st.session_state.df_data['Nama'].str.lower() == nama_pilihan.lower()]
+        if not match.empty:
+            no_hp_default = match['No HP'].values[0]
+
     with st.form("form_baru", clear_on_submit=True):
-        nama = st.text_input("Nama Pelanggan")
-        no_hp = st.text_input("No HP")
+        nama = st.text_input("Nama Pelanggan", value=nama_pilihan if nama_pilihan else "")
+        no_hp = st.text_input("No HP", value=no_hp_default)
         tagihan = st.selectbox("Tagihan", [150000, 200000, 250000, 300000])
         submit = st.form_submit_button("SIMPAN TRANSAKSI")
         
@@ -70,7 +83,7 @@ with tab1:
 
 with tab2:
     col1, col2 = st.columns(2)
-    s_nama = col1.text_input("🔍 Cari Nama")
+    s_nama = col1.text_input("🔍 Cari Nama", key="search_nama_tab2")
     s_bulan = col2.selectbox("📅 Filter Bulan", ["Semua"] + LIST_BULAN)
     
     df_temp = st.session_state.df_data.copy()
@@ -85,7 +98,9 @@ with tab2:
         st.session_state.df_data.update(edited)
         conn.update(data=st.session_state.df_data)
         st.success("Perubahan tersimpan!")
+        st.rerun()
 
     if st.button("🔄 Refresh Data"):
+        st.cache_resource.clear()
         st.session_state.df_data = load_data()
         st.rerun()
