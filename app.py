@@ -19,7 +19,7 @@ if 'df_data' not in st.session_state:
     st.session_state.df_data = load_data()
 
 # --- FUNGSI WA ---
-def buat_link_wa(nama, tagihan, tgl, no_hp):
+def buat_link_wa(nama, tagihan, tgl_input, no_hp):
     num = "".join(filter(str.isdigit, str(no_hp)))
     if not num: return None
     if num.startswith('0'): num = '62' + num[1:]
@@ -28,7 +28,7 @@ def buat_link_wa(nama, tagihan, tgl, no_hp):
     pesan = (f"Halo Kak *{nama.upper()}*,\n\n"
              f"Terima kasih, pembayaran internet *MASDABIYANET* telah kami terima.\n"
              f"Total: *Rp {int(tagihan):,}*\n"
-             f"Tanggal: *{tgl}*\n\n"
+             f"Tanggal: *{tgl_input}*\n\n"
              f"Status: *LUNAS* ✅\n"
              f"Selamat berinternet kembali!\n\n"
              f"💚Untuk Pelanggan Setia\n"
@@ -38,12 +38,11 @@ def buat_link_wa(nama, tagihan, tgl, no_hp):
              f"Ttd\nMASDABIYANET")
     return f"https://wa.me/{num}?text={urllib.parse.quote(pesan)}"
 
-# --- UI ---
+# --- UI UTAMA ---
 st.title("💰 MASDABIYANET")
 tab1, tab2 = st.tabs(["➕ INPUT TRANSAKSI BARU", "📋 KELOLA DATA PELANGGAN"])
 
 with tab1:
-    # Autocomplete Nama
     def search_pelanggan(search_term):
         df = st.session_state.df_data
         return [nama for nama in df['Nama'].unique() if search_term.lower() in nama.lower()]
@@ -59,13 +58,13 @@ with tab1:
     with st.form("form_baru", clear_on_submit=True):
         nama = st.text_input("Nama Pelanggan", value=nama_pilihan if nama_pilihan else "")
         no_hp = st.text_input("No HP", value=no_hp_default)
+        tgl_transaksi = st.date_input("Pilih Tanggal Pembayaran", datetime.now())
         tagihan = st.selectbox("Tagihan", [150000, 200000, 250000, 300000])
         submit = st.form_submit_button("SIMPAN TRANSAKSI")
         
         if submit:
-            tgl_hari_ini = datetime.now()
-            tgl_str = tgl_hari_ini.strftime("%d/%m/%Y")
-            bulan_key = LIST_BULAN[tgl_hari_ini.month - 1]
+            tgl_str = tgl_transaksi.strftime("%d/%m/%Y")
+            bulan_key = LIST_BULAN[tgl_transaksi.month - 1]
             
             if nama in st.session_state.df_data['Nama'].values:
                 idx = st.session_state.df_data.index[st.session_state.df_data['Nama'] == nama][0]
@@ -76,7 +75,7 @@ with tab1:
                 st.session_state.df_data = pd.concat([st.session_state.df_data, pd.DataFrame([new_row])], ignore_index=True)
             
             conn.update(data=st.session_state.df_data)
-            st.success(f"Data {nama} berhasil disimpan!")
+            st.success(f"Data {nama} berhasil disimpan untuk tanggal {tgl_str}!")
             
             link_wa = buat_link_wa(nama, tagihan, tgl_str, no_hp)
             st.markdown(f'<a href="{link_wa}" target="_blank" style="padding:15px; background-color:#25D366; color:white; border-radius:8px; text-align:center; display:block; font-weight:bold; text-decoration:none;">📲 KIRIM NOTA VIA WHATSAPP</a>', unsafe_allow_html=True)
