@@ -2,74 +2,70 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 from datetime import datetime
-from streamlit_searchbox import st_searchbox
-import urllib.parse
 
-st.set_page_config(page_title="BAYAR-MASDABIYANET", layout="centered", page_icon="💰")
+st.set_page_config(page_title="BAYAR-MASDABIYANET", layout="wide", page_icon="💰")
 
-# --- 1. INISIALISASI ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# Gunakan session_state agar data hanya dibaca 1x per sesi
+# --- 1. INISIALISASI DATA ---
 if 'df_data' not in st.session_state:
     st.session_state.df_data = conn.read().astype(str).replace('nan', '')
 
-# --- 2. FUNGSI UTAMA ---
-def get_names(search_term):
-    df = st.session_state.df_data
-    all_names = df['Nama'].unique().tolist()
-    return [name for name in all_names if search_term.lower() in name.lower()]
+# Daftar bulan sesuai dengan header Google Sheets Anda
+LIST_BULAN = ['jan', 'feb', 'mar', 'apr', 'mei', 'jun', 'jul', 'agu', 'sep', 'okt', 'nov', 'des']
 
-def buat_link_wa(nama, tagihan, tgl, no_hp):
-    num = "".join(filter(str.isdigit, str(no_hp)))
-    if not num: return None
-    if num.startswith('0'): num = '62' + num[1:]
-    elif not num.startswith('62'): num = '62' + num
-    pesan = f"Halo *{nama.upper()}*, pembayaran *MASDABIYANET* Rp{int(tagihan):,} tgl {tgl} telah diterima. Status: *LUNAS* ✅"
-    return f"https://wa.me/{num}?text={urllib.parse.quote(pesan)}"
+st.title("💰 MASDABIYANET")
 
-# --- 3. UI SEARCH ---
-nama_pilihan = st_searchbox(get_names, label="Cari Pelanggan", key="searchbox")
+tab1, tab2 = st.tabs(["➕ INPUT TRANSAKSI BARU", "📋 KELOLA DATA PELANGGAN"])
 
-# Ambil No HP dari state tanpa query API
-no_hp_val = ""
-if nama_pilihan:
-    row = st.session_state.df_data[st.session_state.df_data['Nama'].str.lower() == nama_pilihan.lower()]
-    if not row.empty:
-        no_hp_val = row['No HP'].values[0]
-
-# --- 4. FORM ---
-with st.form("form_transaksi"):
-    tgl = st.date_input("TANGGAL", datetime.now())
-    tagihan = st.selectbox("TAGIHAN", [150000, 200000, 250000, 300000])
-    no_hp = st.text_input("NO WA", value=no_hp_val)
-    submit = st.form_submit_button("SIMPAN & KIRIM")
-
-if submit:
-    if not nama_pilihan:
-        st.error("Pilih pelanggan terlebih dahulu!")
-    else:
-        with st.spinner("Memproses..."):
-            # Update data lokal
-            tgl_str = tgl.strftime("%d/%m/%Y")
-            bulan_key = tgl.strftime("%b").lower()
+with tab1:
+    with st.form("form_baru", clear_on_submit=True):
+        nama = st.text_input("Nama Pelanggan")
+        no_hp = st.text_input("No HP")
+        tagihan = st.selectbox("Tagihan", [150000, 200000, 250000, 300000])
+        submit = st.form_submit_button("SIMPAN")
+        
+        if submit:
+            tgl_hari_ini = datetime.now()
+            tgl_str = tgl_hari_ini.strftime("%d/%m/%Y")
+            # Mengambil index bulan untuk mencocokkan dengan list (jan=0, feb=1, dst)
+            bulan_key = LIST_BULAN[tgl_hari_ini.month - 1]
             
-            # Update DataFrame
-            idx = st.session_state.df_data.index[st.session_state.df_data['Nama'].str.lower() == nama_pilihan.lower()]
-            if not idx.empty:
-                st.session_state.df_data.loc[idx[0], ['No HP', 'Tanggal Bayar', 'Tagihan', bulan_key]] = [no_hp, tgl_str, str(tagihan), tgl_str]
+            # Update atau Tambah Data
+            if nama in st.session_state.df_data['Nama'].values:
+                idx = st.session_state.df_data.index[st.session_state.df_data['Nama'] == nama][0]
+                st.session_state.df_data.at[idx, bulan_key] = tgl_str
             else:
-                new_row = {"Nama": nama_pilihan, "No HP": no_hp, "Tanggal Bayar": tgl_str, "Tagihan": str(tagihan), bulan_key: tgl_str}
+                new_row = {"Nama": nama, "No HP": no_hp, "Tagihan": str(tagihan), bulan_key: tgl_str}
                 st.session_state.df_data = pd.concat([st.session_state.df_data, pd.DataFrame([new_row])], ignore_index=True)
             
-            # Push ke Google Sheets sekali saja
             conn.update(data=st.session_state.df_data)
-            st.success("Data tersimpan!")
-            
-            link = buat_link_wa(nama_pilihan, tagihan, tgl_str, no_hp)
-            st.markdown(f'<a href="{link}" target="_blank" style="padding:10px; background:#25D366; color:white; border-radius:5px; text-decoration:none;">📲 Kirim WA</a>', unsafe_allow_html=True)
+            st.success(f"Data {nama} berhasil disimpan untuk bulan {bulan_key.upper()}!")
 
-# Tombol Refresh untuk sinkronisasi manual
-if st.button("🔄 Refresh Data dari Google Sheets"):
-    st.session_state.df_data = conn.read().astype(str).replace('nan', '')
-    st.rerun()
+with tab2:
+    # --- PENCARIAN & FILTER ---
+    col1, col2 = st.columns(2)
+    s_nama = col1.text_input("🔍 Cari Nama")
+    s_bulan = col2.selectbox("📅 Filter Berdasarkan Bulan", ["Semua"] + LIST_BULAN)
+    
+    df_temp = st.session_state.df_data.copy()
+    
+    if s_nama:
+        df_temp = df_temp[df_temp['Nama'].str.contains(s_nama, case=False, na=False)]
+    if s_bulan != "Semua":
+        # Hanya tampilkan baris yang ada isi tanggalnya di bulan tersebut
+        df_temp = df_temp[df_temp[s_bulan] != ""]
+        
+    # --- EDIT & HAPUS ---
+    st.info("💡 Edit langsung di tabel. Klik tombol di bawah untuk menyimpan perubahan.")
+    edited = st.data_editor(df_temp, num_rows="dynamic", use_container_width=True)
+    
+    if st.button("💾 SIMPAN SEMUA PERUBAHAN KE SHEETS"):
+        # Update session state dengan data hasil edit
+        st.session_state.df_data.update(edited)
+        conn.update(data=st.session_state.df_data)
+        st.success("Perubahan berhasil tersimpan ke Google Sheets!")
+
+    if st.button("🔄 Refresh Data"):
+        st.session_state.df_data = conn.read().astype(str).replace('nan', '')
+        st.rerun()
