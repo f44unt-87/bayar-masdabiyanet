@@ -15,15 +15,16 @@ LIST_BULAN = ['jan', 'feb', 'mar', 'apr', 'mei', 'jun', 'jul', 'agu', 'sep', 'ok
 @st.cache_resource(ttl=600)
 def load_data():
     try:
-        # Membaca data mentah dari Google Sheets
-        df = conn.read()
+        # Link Google Sheets langsung dimasukkan ke dalam kode untuk bypass error Secrets
+        url_sheets = "https://docs.google.com/spreadsheets/d/1XAYkTXGSjHUvd8uK2iTEEwfqbb07Q-HkUWxJgCRm5Tk/edit?usp=drivesdk"
+        df = conn.read(spreadsheet=url_sheets)
+        
         if df is not None and not df.empty:
-            # Mengisi sel kosong (NaN) dengan string kosong secara aman sebelum konversi tipe data
+            # Mengisi sel kosong (NaN) dengan string kosong secara aman
             return df.fillna('').astype(str)
-        # Jika sheet kosong, buat DataFrame dasar agar aplikasi tidak crash
         return pd.DataFrame(columns=['Nama', 'No HP', 'Tagihan'] + LIST_BULAN)
     except Exception as e:
-        st.error(f"Gagal mengambil data dari Google Sheets. Pastikan Secrets sudah terpasang. Detail: {e}")
+        st.error(f"Gagal mengambil data dari Google Sheets. Detail: {e}")
         return pd.DataFrame(columns=['Nama', 'No HP', 'Tagihan'] + LIST_BULAN)
 
 # Memastikan data termuat di session state
@@ -46,7 +47,7 @@ def buat_link_wa(nama, tagihan, tgl_input, no_hp):
              f"💚Untuk Pelanggan Setia\n"
              f"\"Terima kasih atas pembayaran Anda! Kami senang dapat melayani kebutuhan internet Anda. "
              f"Semoga layanan kami membawa kemudahan dan kenyamanan dalam aktivitas Anda.\n"
-             f"Dan semoga REZEKI Anda dilancarkan oleh Allah. Amiin 🤲\n\n"
+             f"Dan semoga REZEKI Anda dilancarkan oleh Allah. Amiin 🤲🏻🤲🏻.\"\n\n"
              f"Ttd\nMASDABIYANET")
     return f"https://wa.me/{num}?text={urllib.parse.quote(pesan)}"
 
@@ -80,7 +81,7 @@ with tab1:
             tgl_str = tgl_transaksi.strftime("%d/%m/%Y")
             bulan_key = LIST_BULAN[tgl_transaksi.month - 1]
             
-            if 'Nama' in st.session_state.df_data['Nama'].values:
+            if 'Nama' in st.session_state.df_data.columns and nama in st.session_state.df_data['Nama'].values:
                 idx = st.session_state.df_data.index[st.session_state.df_data['Nama'] == nama][0]
                 st.session_state.df_data.at[idx, bulan_key] = tgl_str
                 st.session_state.df_data.at[idx, 'No HP'] = no_hp
@@ -89,7 +90,9 @@ with tab1:
                 st.session_state.df_data = pd.concat([st.session_state.df_data, pd.DataFrame([new_row])], ignore_index=True)
             
             try:
-                conn.update(data=st.session_state.df_data)
+                # Update data menggunakan link spesifik agar sinkron dengan Google Sheets
+                url_sheets = "https://docs.google.com/spreadsheets/d/1XAYkTXGSjHUvd8uK2iTEEwfqbb07Q-HkUWxJgCRm5Tk/edit?usp=drivesdk"
+                conn.update(spreadsheet=url_sheets, data=st.session_state.df_data)
                 st.success(f"Data {nama} berhasil disimpan untuk tanggal {tgl_str}!")
                 
                 link_wa = buat_link_wa(nama, tagihan, tgl_str, no_hp)
@@ -109,13 +112,14 @@ with tab2:
     if s_bulan != "Semua" and s_bulan in df_temp.columns:
         df_temp = df_temp[df_temp[s_bulan] != ""]
         
-    # Memperbaiki use_container_width menjadi width="stretch" sesuai standar Streamlit terbaru
+    # Menggunakan standar parameter lebar terbaru (width="stretch")
     edited = st.data_editor(df_temp, num_rows="dynamic", width="stretch")
     
     if st.button("💾 SIMPAN SEMUA PERUBAHAN KE SHEETS"):
         try:
             st.session_state.df_data.update(edited)
-            conn.update(data=st.session_state.df_data)
+            url_sheets = "https://docs.google.com/spreadsheets/d/1XAYkTXGSjHUvd8uK2iTEEwfqbb07Q-HkUWxJgCRm5Tk/edit?usp=drivesdk"
+            conn.update(spreadsheet=url_sheets, data=st.session_state.df_data)
             st.success("Perubahan tersimpan!")
             st.rerun()
         except Exception as e:
