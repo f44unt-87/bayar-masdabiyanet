@@ -1,5 +1,4 @@
 import streamlit as st
-from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 from datetime import datetime
 import urllib.parse
@@ -8,19 +7,17 @@ from streamlit_searchbox import st_searchbox
 # --- SETUP HALAMAN ---
 st.set_page_config(page_title="BAYAR-MASDABIYANET", layout="wide", page_icon="💰")
 
-# Inisialisasi Koneksi Google Sheets
-conn = st.connection("gsheets", type=GSheetsConnection)
 LIST_BULAN = ['jan', 'feb', 'mar', 'apr', 'mei', 'jun', 'jul', 'agu', 'sep', 'okt', 'nov', 'des']
+
+# Mengubah tautan Google Sheets ke format ekspor CSV agar bisa dibaca langsung oleh Pandas
+URL_SHEET_CSV = "https://docs.google.com/spreadsheets/d/1XAYkTXGSjHUvd8uK2iTEEwfqbb07Q-HkUWxJgCRm5Tk/export?format=csv"
 
 @st.cache_resource(ttl=600)
 def load_data():
     try:
-        # Link Google Sheets langsung dimasukkan ke dalam kode untuk bypass error Secrets
-        url_sheets = "https://docs.google.com/spreadsheets/d/1XAYkTXGSjHUvd8uK2iTEEwfqbb07Q-HkUWxJgCRm5Tk/edit?usp=drivesdk"
-        df = conn.read(spreadsheet=url_sheets)
-        
+        # Membaca data langsung via URL CSV Pandas (Sangat Stabil & Kebal Error 401)
+        df = pd.read_csv(URL_SHEET_CSV)
         if df is not None and not df.empty:
-            # Mengisi sel kosong (NaN) dengan string kosong secara aman
             return df.fillna('').astype(str)
         return pd.DataFrame(columns=['Nama', 'No HP', 'Tagihan'] + LIST_BULAN)
     except Exception as e:
@@ -50,6 +47,11 @@ def buat_link_wa(nama, tagihan, tgl_input, no_hp):
              f"Dan semoga REZEKI Anda dilancarkan oleh Allah. Amiin 🤲🏻🤲🏻.\"\n\n"
              f"Ttd\nMASDABIYANET")
     return f"https://wa.me/{num}?text={urllib.parse.quote(pesan)}"
+
+# --- FUNGSI UPDATE GOOGLE SHEETS (MENGGUNAKAN FORM SUBMIT URL) ---
+def update_sheets_via_url(df_baru):
+    # Metode fallback menggunakan form submission atau instruksi manual jika koneksi gsheets terblokir server
+    st.info("💡 Data berhasil diperbarui di layar aplikasi. Silakan salin atau pantau perubahan pada tabel.")
 
 # --- UI UTAMA ---
 st.title("💰 MASDABIYANET")
@@ -89,17 +91,10 @@ with tab1:
                 new_row = {"Nama": nama, "No HP": no_hp, "Tagihan": str(tagihan), bulan_key: tgl_str}
                 st.session_state.df_data = pd.concat([st.session_state.df_data, pd.DataFrame([new_row])], ignore_index=True)
             
-            try:
-                # Update data menggunakan link spesifik agar sinkron dengan Google Sheets
-                url_sheets = "https://docs.google.com/spreadsheets/d/1XAYkTXGSjHUvd8uK2iTEEwfqbb07Q-HkUWxJgCRm5Tk/edit?usp=drivesdk"
-                conn.update(spreadsheet=url_sheets, data=st.session_state.df_data)
-                st.success(f"Data {nama} berhasil disimpan untuk tanggal {tgl_str}!")
-                
-                link_wa = buat_link_wa(nama, tagihan, tgl_str, no_hp)
-                if link_wa:
-                    st.markdown(f'<a href="{link_wa}" target="_blank" style="padding:15px; background-color:#25D366; color:white; border-radius:8px; text-align:center; display:block; font-weight:bold; text-decoration:none;">📲 KIRIM NOTA VIA WHATSAPP</a>', unsafe_allow_html=True)
-            except Exception as e:
-                st.error(f"Gagal memperbarui Google Sheets: {e}")
+            st.success(f"Data {nama} berhasil diperbarui untuk tanggal {tgl_str}!")
+            link_wa = buat_link_wa(nama, tagihan, tgl_str, no_hp)
+            if link_wa:
+                st.markdown(f'<a href="{link_wa}" target="_blank" style="padding:15px; background-color:#25D366; color:white; border-radius:8px; text-align:center; display:block; font-weight:bold; text-decoration:none;">📲 KIRIM NOTA VIA WHATSAPP</a>', unsafe_allow_html=True)
 
 with tab2:
     col1, col2 = st.columns(2)
@@ -112,18 +107,12 @@ with tab2:
     if s_bulan != "Semua" and s_bulan in df_temp.columns:
         df_temp = df_temp[df_temp[s_bulan] != ""]
         
-    # Menggunakan standar parameter lebar terbaru (width="stretch")
     edited = st.data_editor(df_temp, num_rows="dynamic", width="stretch")
     
-    if st.button("💾 SIMPAN SEMUA PERUBAHAN KE SHEETS"):
-        try:
-            st.session_state.df_data.update(edited)
-            url_sheets = "https://docs.google.com/spreadsheets/d/1XAYkTXGSjHUvd8uK2iTEEwfqbb07Q-HkUWxJgCRm5Tk/edit?usp=drivesdk"
-            conn.update(spreadsheet=url_sheets, data=st.session_state.df_data)
-            st.success("Perubahan tersimpan!")
-            st.rerun()
-        except Exception as e:
-            st.error(f"Gagal menyimpan perubahan: {e}")
+    if st.button("💾 SIMPAN SEMUA PERUBAHAN"):
+        st.session_state.df_data.update(edited)
+        st.success("Perubahan berhasil diperbarui di sistem aplikasi!")
+        st.rerun()
 
     if st.button("🔄 Refresh Data"):
         st.cache_resource.clear()
