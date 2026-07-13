@@ -1,4 +1,4 @@
 streamlit==1.35.0
 pandas==2.2.2
-st-gsheets-connection==0.0.3
-streamlit-searchbox==0.1.5
+st-gsheets-connection
+streamlit-searchbox
